@@ -1,10 +1,10 @@
 import os
 import re
+import csv
 import time
-import json
-import pickle
 import xml.sax
 import multiprocessing
+from queue import Empty
 from threading import Thread
 from wikireader import WikiReader
 
@@ -12,24 +12,36 @@ from wikireader import WikiReader
 def extract_anchors():
     while not (finish and articles.empty()):
 
-        title, text = articles.get()
+        try:
+            title, text = articles.get(timeout=2)
+        except Empty:
+            continue
 
         if re.search("{{[Rr]ozlišovacia stránka}}", text):
 
             anchors = re.findall("\\[\\[([^\\]\\|]+)\\|?([^\\[]+)?\\]\\]", text)
-            print(anchors)
-            processed_anchors.put(anchors)
-
-        processed_articles.put(json.dumps({"page": title, "sentences": text}))
+            # print(anchors)
+            for anchor in anchors:
+                line = list(anchor)
+                line.insert(0, title)
+                processed_anchors.put(line)
+                # print(line)
 
 
 def write_to_file():
+    csv_writer = csv.writer(disambiguation_content, delimiter='\t')
+
     while not (finish and processed_anchors.empty()):
-        pickle.dump(processed_anchors.get(), out_file)
+        try:
+            anchors = processed_anchors.get(timeout=1)
+        except Empty:
+            continue
+
+        csv_writer.writerow(anchors)
 
 
 def print_status():
-    while True:
+    while not finish:
         print("Articles: For processing: {0} For writing: {1} Read: {2}".format(
             articles.qsize(),
             processed_anchors.qsize(),
@@ -39,13 +51,13 @@ def print_status():
 
 if __name__ == "__main__":
     finish = False
+    extracting_done = False
     SRC_PATH = 'C:\\Users\\andre\\IdeaProjects\\VINF_Disambiguation_pages\\data\\'
     OUTPUT_PATH = 'C:\\Users\\andre\\IdeaProjects\\VINF_Disambiguation_pages\\output\\'
     SRC_FILE = 'test_sample.xml'
-    OUTPUT = 'disambiguation_pages_content.p'
+    DISAMBIGUATION_CONTENT = 'disambiguation_pages_content.csv'
 
     wiki = os.path.join(SRC_PATH, SRC_FILE)
-    out_file = open(os.path.join(OUTPUT_PATH, OUTPUT), "wb")
 
     manager = multiprocessing.Manager()
     articles = manager.Queue(maxsize=1000)
@@ -54,18 +66,25 @@ if __name__ == "__main__":
 
     reader = WikiReader(lambda ns: ns == 0, articles.put)
 
-    status_thread = Thread(target=print_status, args=())
-    status_thread.start()
+    with open(os.path.join(OUTPUT_PATH, DISAMBIGUATION_CONTENT), "w", newline='') as disambiguation_content:
 
-    threads = []
-    for _ in range(2):
-        threads = Thread(target=extract_anchors())
-        threads.start()
+        status_thread = Thread(target=print_status, args=())
+        status_thread.start()
 
-    write_thread = Thread(target=write_to_file)
-    write_thread.start()
+        threads = []
+        for _ in range(1):
+            threads.append(Thread(target=extract_anchors))
+            threads[-1].start()
 
-    xml.sax.parse(wiki, reader)
-    finish = True
+        write_thread = Thread(target=write_to_file)
+        write_thread.start()
 
-    # print(processed_anchors)
+        xml.sax.parse(wiki, reader)
+        finish = True
+
+        status_thread.join()
+        write_thread.join()
+        for thread in threads:
+            print("Joining thread {0}".format(thread.getName()))
+            thread.join()
+        print("Threads joined")
