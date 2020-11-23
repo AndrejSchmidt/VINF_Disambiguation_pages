@@ -54,7 +54,7 @@ if __name__ == "__main__":
     extracting_done = False
     SRC_PATH = 'C:\\Users\\andre\\IdeaProjects\\VINF_Disambiguation_pages\\data\\'
     OUTPUT_PATH = 'C:\\Users\\andre\\IdeaProjects\\VINF_Disambiguation_pages\\output\\'
-    SRC_FILE = 'test_sample.xml'
+    SRC_FILE = 'skwiki-latest-pages-articles.xml'
     DISAMBIGUATION_CONTENT = 'disambiguation_pages_content.csv'
 
     wiki = os.path.join(SRC_PATH, SRC_FILE)

@@ -7,54 +7,62 @@ import multiprocessing
 from queue import Empty
 from threading import Thread
 from wikireader import WikiReader
+from whoosh.index import create_in
+from whoosh.fields import *
+
+
+def wiki_text_to_plain_text(text):
+    while re.search("{{(?:[^{]|(?<!{){)*?}}", text):
+        text = re.sub("{{(?:[^{]|(?<!{){)*?}}", "", text)
+
+        # ("1. ->" + text + "<-")
+
+    # removal of pictures
+    text = re.sub("\\[\\[(Súbor|File):.*(\\[\\[(?:[^\\[]|(?<!\\[)\\[)*?\\]\\])*.*\\]\\]", "", text)
+    # print("2. ->" + text + "<-")
+    # cut first few sentences
+    text = re.search("\\S(?:[^\\.]*?[\\.\n]){1}|\\S[^\\n].*", text).group()
+    # print("3. ->" + text + "<-")
+
+    # removal of anchors with alternate text
+    text = re.sub("\\[\\[[^\\[\\|]*?\\|", "", text)
+    # removal of normal anchors
+    text = re.sub("\\[\\[", "", text)
+    text = re.sub("\\]\\]", "", text)
+    text = re.sub("'''", "", text)
+    text = re.sub("''", "", text)
+    text = re.sub("'''''", "", text)
+
+    # print("4. ->" + text + "<-")
+    return text
 
 
 def extract_article_info():
     while not (finish and articles.empty()):
-
         try:
             title, text = articles.get(timeout=2)
         except Empty:
             continue
 
-        # print(title)
-
         with open(os.path.join(OUTPUT_PATH, DISAMBIGUATION_CONTENT), 'r', newline='') as disambiguation_content:
-
+            keywords = ""
             csv_reader = csv.reader(disambiguation_content, delimiter='\t')
 
+            parsed = False
             for line in csv_reader:
                 if title == line[1]:
+                    if keywords == "":
+                        keywords += line[0]
+                    else:
+                        keywords += " " + line[0]
 
-                    while re.search("{{(?:[^{]|(?<!{){)*?}}", text):
-                        text = re.sub("{{(?:[^{]|(?<!{){)*?}}", "", text)
+                    if not parsed:
+                        parsed = True
+                        text = wiki_text_to_plain_text(text)
 
-                    # removal of pictures
-                    text = re.sub("\\[\\[Súbor:.*?\\]\\]", "", text)
-                    # text = re.sub("\\[\\[File:.*?\\]\\]", "", text)
-                    # print("->" + text + "<-")
-                    # cut first few sentences
-                    first_sentences = re.findall("[^\\n](?:[^\\.]*?\\.){1}", text)
-                    # print(first_sentences)
-
-                    try:
-                        text = first_sentences[0]
-                    except IndexError:
-                        pass
-
-                    # removal of double anchors
-                    text = re.sub("\\[\\[[^\\[\\|]*?\\|", "", text)
-                    # removal of normal anchors
-                    text = re.sub("\\[\\[", "", text)
-                    text = re.sub("\\]\\]", "", text)
-                    text = re.sub("'''", "", text)
-                    text = re.sub("''", "", text)
-                    text = re.sub("'''''", "", text)
-                    # cut first few sentences
-
-                    line = (line[0], title, line[2], text)
-
-                    processed_disambiguation_pages.put(line)
+            if keywords != "":
+                processed_line = (keywords, title, line[2], text)
+                processed_disambiguation_pages.put(processed_line)
 
             disambiguation_content.seek(0)
 
@@ -63,13 +71,27 @@ def write_to_file():
     with open(os.path.join(OUTPUT_PATH, OUTPUT), 'w', newline='') as output:
         csv_writer = csv.writer(output, delimiter='\t')
 
+        schema = Schema(disambiguation_page=KEYWORD(stored=True, commas=True),
+                        title=TEXT(stored=True),
+                        anchor_text=STORED,
+                        text=TEXT(stored=True))
+        ix = create_in("C:\\Users\\andre\\IdeaProjects\\VINF_Disambiguation_pages\\index", schema)
+        writer = ix.writer()
+
         while not (finish and processed_disambiguation_pages.empty()):
             try:
-                anchors = processed_disambiguation_pages.get(timeout=1)
+                processed_line = processed_disambiguation_pages.get(timeout=1)
             except Empty:
                 continue
 
-            csv_writer.writerow(anchors)
+            csv_writer.writerow(processed_line)
+
+            writer.add_document(disambiguation_page=processed_line[0],
+                                title=processed_line[1],
+                                anchor_text=processed_line[2],
+                                text=processed_line[3])
+
+        writer.commit()
 
 
 def print_status():
