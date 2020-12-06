@@ -1,11 +1,15 @@
 import os
-import re
 import csv
 import time
 import xml.sax
 import multiprocessing
+import stemmsk
+from multiprocessing.context import Process
 from queue import Empty
 from threading import Thread
+from whoosh.analysis import CharsetFilter, RegexTokenizer, LowercaseFilter, StopFilter, StemFilter
+from whoosh.support.charset import accent_map
+
 from wikireader import WikiReader
 from whoosh.index import create_in
 from whoosh.fields import *
@@ -15,13 +19,15 @@ def wiki_text_to_plain_text(text):
     while re.search("{{(?:[^{]|(?<!{){)*?}}", text):
         text = re.sub("{{(?:[^{]|(?<!{){)*?}}", "", text)
 
-        # ("1. ->" + text + "<-")
+    # ("1. ->" + text + "<-")
 
     # removal of pictures
     text = re.sub("\\[\\[(Súbor|File):.*(\\[\\[(?:[^\\[]|(?<!\\[)\\[)*?\\]\\])*.*\\]\\]", "", text)
     # print("2. ->" + text + "<-")
+    # removal of html
+    text = re.sub("<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});", "", text)
     # cut first few sentences
-    text = re.search("\\S(?:[^\\.]*?[\\.\n]){1}|\\S[^\\n].*", text).group()
+    text = re.search("\\S(?:.{100,}?[^\\.]*?(?<!\\d)[\\.\n])|\\S[^\\n].*", text).group()
     # print("3. ->" + text + "<-")
 
     # removal of anchors with alternate text
@@ -37,14 +43,20 @@ def wiki_text_to_plain_text(text):
     return text
 
 
-def extract_article_info():
-    while not (finish and articles.empty()):
+def extract_article_info(output_path, disambiguation_content_name, receiver, articles_queue,
+                         processed_disambiguation_pages_queue):
+    finish = False
+
+    while not (finish and articles_queue.empty()):
+        if receiver.poll() is True:
+            finish = True
+
         try:
-            title, text = articles.get(timeout=2)
+            title, text = articles_queue.get(timeout=2)
         except Empty:
             continue
 
-        with open(os.path.join(OUTPUT_PATH, DISAMBIGUATION_CONTENT), 'r', newline='') as disambiguation_content:
+        with open(os.path.join(output_path, disambiguation_content_name), 'r', newline='') as disambiguation_content:
             keywords = ""
             csv_reader = csv.reader(disambiguation_content, delimiter='\t')
 
@@ -62,25 +74,33 @@ def extract_article_info():
 
             if keywords != "":
                 processed_line = (keywords, title, line[2], text)
-                processed_disambiguation_pages.put(processed_line)
+                processed_disambiguation_pages_queue.put(processed_line)
 
             disambiguation_content.seek(0)
 
 
-def write_to_file():
-    with open(os.path.join(OUTPUT_PATH, OUTPUT), 'w', newline='') as output:
+def write_to_file(output_path, output, receiver, processed_disambiguation_pages_queue, stopwords_list):
+    with open(os.path.join(output_path, output), 'w', newline='') as output:
         csv_writer = csv.writer(output, delimiter='\t')
 
-        schema = Schema(disambiguation_page=KEYWORD(stored=True, commas=True),
-                        title=TEXT(stored=True),
+        analyzer = RegexTokenizer() | LowercaseFilter() | StopFilter(stoplist=stopwords_list) | StemFilter(
+            stemmsk._remove_case) | CharsetFilter(accent_map)
+
+        schema = Schema(disambiguation_page=KEYWORD(stored=True, commas=True, analyzer=analyzer, ),
+                        title=TEXT(stored=True, analyzer=analyzer, ),
                         anchor_text=STORED,
-                        text=TEXT(stored=True))
+                        text=TEXT(stored=True, analyzer=analyzer, ))
         ix = create_in("C:\\Users\\andre\\IdeaProjects\\VINF_Disambiguation_pages\\index", schema)
         writer = ix.writer()
 
-        while not (finish and processed_disambiguation_pages.empty()):
+        finish = False
+
+        while not (finish and processed_disambiguation_pages_queue.empty()):
+            if receiver.poll() is True:
+                finish = True
+
             try:
-                processed_line = processed_disambiguation_pages.get(timeout=1)
+                processed_line = processed_disambiguation_pages_queue.get(timeout=1)
             except Empty:
                 continue
 
@@ -94,50 +114,71 @@ def write_to_file():
         writer.commit()
 
 
-def print_status():
+def print_status(receiver, articles_queue, processed_disambiguation_pages_queue):
+    finish = False
+
     while not finish:
+        if receiver.poll() is True:
+            finish = True
+
         print("Articles: For processing: {0} For writing: {1} Read: {2}".format(
-            articles.qsize(),
-            processed_disambiguation_pages.qsize(),
+            articles_queue.qsize(),
+            processed_disambiguation_pages_queue.qsize(),
             reader.status_count))
         time.sleep(1)
 
 
 if __name__ == "__main__":
-    finish = False
-    extracting_done = False
     SRC_PATH = 'C:\\Users\\andre\\IdeaProjects\\VINF_Disambiguation_pages\\data\\'
     OUTPUT_PATH = 'C:\\Users\\andre\\IdeaProjects\\VINF_Disambiguation_pages\\output\\'
     SRC_FILE = 'test_sample.xml'
     DISAMBIGUATION_CONTENT = 'disambiguation_pages_content.csv'
     OUTPUT = 'output.csv'
+    STOP_WORDS_FILE = 'stopwords_file.txt'
 
     wiki = os.path.join(SRC_PATH, SRC_FILE)
 
+    r, s = multiprocessing.Pipe()
     manager = multiprocessing.Manager()
-    articles = manager.Queue(maxsize=1000)
-    processed_articles = manager.Queue(maxsize=1000)
+    articles = manager.Queue(maxsize=2000)
     processed_disambiguation_pages = manager.Queue()
+    anchor_similarities = manager.Queue(maxsize=2000)
+
+    stopwords = []
+
+    with open(os.path.join(SRC_PATH, STOP_WORDS_FILE), "r") as stopwords_file:
+        for line in stopwords_file:
+            stopwords.extend(line.split())
 
     reader = WikiReader(lambda ns: ns == 0, articles.put)
 
-    status_thread = Thread(target=print_status, args=())
+    status_thread = Thread(target=print_status, args=(r, articles, processed_disambiguation_pages))
     status_thread.start()
 
-    threads = []
-    for _ in range(1):
-        threads.append(Thread(target=extract_article_info))
-        threads[-1].start()
+    processes = []
+    for i in range(4):
+        processes.append(Process(target=extract_article_info,
+                                 args=(OUTPUT_PATH,
+                                       DISAMBIGUATION_CONTENT,
+                                       r, articles,
+                                       processed_disambiguation_pages)))
+        processes[i].start()
 
-    write_thread = Thread(target=write_to_file)
-    write_thread.start()
+    write_process = Thread(target=write_to_file,
+                           args=(OUTPUT_PATH,
+                                 OUTPUT, r,
+                                 processed_disambiguation_pages,
+                                 stopwords))
+    write_process.start()
 
     xml.sax.parse(wiki, reader)
-    finish = True
+    # signal finish
+    s.send(True)
 
     status_thread.join()
-    write_thread.join()
-    for thread in threads:
-        print("Joining thread {0}".format(thread.getName()))
-        thread.join()
+    print("status thread joined")
+    write_process.join()
+    for process in processes:
+        print("Joining thread...")
+        process.join()
     print("Threads joined")
