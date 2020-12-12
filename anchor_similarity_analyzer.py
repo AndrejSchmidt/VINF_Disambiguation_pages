@@ -40,13 +40,13 @@ if __name__ == "__main__":
                     lowest_disambig = previous_disambig
 
                 # alternative array method
-                results.append(average_score)
+                results.append((average_score, previous_disambig))
 
                 sum = float(line[3])
                 i = 1
                 previous_disambig = line[0]
 
-    n_lowest = nsmallest(10, results)
+    n_lowest = nsmallest(10, results, key=lambda x: x[0])
     print(n_lowest)
 
     print(lowest_disambig + " " + str(lowest_average_score))
