@@ -56,7 +56,7 @@ def extract_article_info(output_path, disambiguation_content_name, receiver, art
         except Empty:
             continue
 
-        with open(os.path.join(output_path, disambiguation_content_name), 'r', newline='') as disambiguation_content:
+        with open(os.path.join(output_path, disambiguation_content_name), 'r', encoding="utf-8", newline='') as disambiguation_content:
             keywords = ""
             csv_reader = csv.reader(disambiguation_content, delimiter='\t')
 
@@ -80,7 +80,7 @@ def extract_article_info(output_path, disambiguation_content_name, receiver, art
 
 
 def write_to_file(output_path, output, receiver, processed_disambiguation_pages_queue, stopwords_list):
-    with open(os.path.join(output_path, output), 'w', newline='') as output:
+    with open(os.path.join(output_path, output), 'w', encoding="utf-8", newline='') as output:
         csv_writer = csv.writer(output, delimiter='\t')
 
         analyzer = RegexTokenizer() | LowercaseFilter() | StopFilter(stoplist=stopwords_list) | StemFilter(
@@ -131,7 +131,7 @@ def print_status(receiver, articles_queue, processed_disambiguation_pages_queue)
 if __name__ == "__main__":
     SRC_PATH = 'C:\\Users\\andre\\IdeaProjects\\VINF_Disambiguation_pages\\data\\'
     OUTPUT_PATH = 'C:\\Users\\andre\\IdeaProjects\\VINF_Disambiguation_pages\\output\\'
-    SRC_FILE = 'test_sample.xml'
+    SRC_FILE = 'skwiki-latest-pages-articles.xml'
     DISAMBIGUATION_CONTENT = 'disambiguation_pages_content.csv'
     OUTPUT = 'output.csv'
     STOP_WORDS_FILE = 'stopwords_file.txt'
@@ -146,7 +146,7 @@ if __name__ == "__main__":
 
     stopwords = []
 
-    with open(os.path.join(SRC_PATH, STOP_WORDS_FILE), "r") as stopwords_file:
+    with open(os.path.join(SRC_PATH, STOP_WORDS_FILE), "r", encoding="utf-8") as stopwords_file:
         for line in stopwords_file:
             stopwords.extend(line.split())
 
@@ -164,7 +164,7 @@ if __name__ == "__main__":
                                        processed_disambiguation_pages)))
         processes[i].start()
 
-    write_process = Thread(target=write_to_file,
+    write_process = Process(target=write_to_file,
                            args=(OUTPUT_PATH,
                                  OUTPUT, r,
                                  processed_disambiguation_pages,

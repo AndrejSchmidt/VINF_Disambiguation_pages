@@ -51,7 +51,7 @@ def extract_anchors(r, articles, processed_anchors):
 
 
 def write_to_file(OUTPUT_PATH, DISAMBIGUATION_CONTENT, r, processed_anchors):
-    with open(os.path.join(OUTPUT_PATH, DISAMBIGUATION_CONTENT), "w", newline='') as disambiguation_content:
+    with open(os.path.join(OUTPUT_PATH, DISAMBIGUATION_CONTENT), "w", encoding="utf-8", newline='') as disambiguation_content:
         csv_writer = csv.writer(disambiguation_content, delimiter='\t')
         finish = False
 
@@ -85,7 +85,7 @@ def print_status(r, articles, processed_anchors):
 if __name__ == "__main__":
     SRC_PATH = 'C:\\Users\\andre\\IdeaProjects\\VINF_Disambiguation_pages\\data\\'
     OUTPUT_PATH = 'C:\\Users\\andre\\IdeaProjects\\VINF_Disambiguation_pages\\output\\'
-    SRC_FILE = 'test_sample.xml'
+    SRC_FILE = 'skwiki-latest-pages-articles.xml'
     DISAMBIGUATION_CONTENT = 'disambiguation_pages_content.csv'
 
     wiki = os.path.join(SRC_PATH, SRC_FILE)
@@ -102,7 +102,7 @@ if __name__ == "__main__":
     status_thread.start()
 
     processes = []
-    for i in range(1):
+    for i in range(3):
         processes.append(Process(target=extract_anchors, args=(r, articles, processed_anchors)))
         processes[i].start()
 
