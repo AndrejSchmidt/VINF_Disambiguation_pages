@@ -102,7 +102,7 @@ if __name__ == "__main__":
     status_thread.start()
 
     processes = []
-    for i in range(3):
+    for i in range(1):
         processes.append(Process(target=extract_anchors, args=(r, articles, processed_anchors)))
         processes[i].start()
 

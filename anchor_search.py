@@ -7,6 +7,8 @@ import stemmsk
 from multiprocessing.context import Process
 from queue import Empty
 from threading import Thread
+
+from bs4 import BeautifulSoup
 from whoosh.analysis import CharsetFilter, RegexTokenizer, LowercaseFilter, StopFilter, StemFilter
 from whoosh.support.charset import accent_map
 
@@ -65,7 +67,15 @@ def extract_article_info(output_path, disambiguation_content_name, receiver, art
 
                 parsed = False
                 for line in csv_reader:
-                    if title == line[1]:
+                    processed_anchor = line[1]
+                    processed_anchor = processed_anchor[0].upper() + processed_anchor[1:]
+                    processed_anchor = BeautifulSoup(markup=processed_anchor, features="html.parser")
+                    processed_anchor = str(processed_anchor)
+                    processed_anchor = re.sub("^ *", "", processed_anchor)
+                    processed_anchor = re.sub(" *$", "", processed_anchor)
+                    processed_anchor = re.sub(" +", " ", processed_anchor)
+                    # print(processed_anchor)
+                    if title == processed_anchor:
                         if keywords == "":
                             keywords += line[0]
                         else:
